@@ -1,21 +1,59 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+// Endereço base da nossa API Java
+const API_URL = 'http://localhost:8080/api/contas/1';
 
 function App() {
-  // Dados simulados (Mocks)
-  const [saldo, setSaldo] = useState(1000.00);
-  const [transacoes, setTransacoes] = useState([
-    { id: 1, tipo: 'DEPOSITO', valor: 1500.00, data: '05/05/2026 14:30' },
-    { id: 2, tipo: 'SAQUE', valor: 500.00, data: '06/05/2026 09:15' }
-  ]);
+  const [saldo, setSaldo] = useState(0);
+  const [transacoes, setTransacoes] = useState([]);
+  const [titular, setTitular] = useState('');
 
   // --- CONTROLE DO MODAL ---
   const [modalAberto, setModalAberto] = useState(false);
-  const [tipoTransacao, setTipoTransacao] = useState(''); // Guarda se é 'DEPOSITO' ou 'SAQUE'
-  const [valorInput, setValorInput] = useState(''); // Guarda o valor digitado
+  const [tipoTransacao, setTipoTransacao] = useState(''); 
+  const [valorInput, setValorInput] = useState('');
+
+  // Busca os dados iniciais ao carregar a página
+  useEffect(() => {
+    carregarDadosConta();
+    carregarExtrato();
+  }, []);
+
+  const carregarDadosConta = async () => {
+    try {
+      const response = await fetch(API_URL);
+      const data = await response.json();
+      setSaldo(data.saldo);
+      setTitular(data.titular);
+    } catch (error) {
+      console.error("Erro ao carregar conta:", error);
+    }
+  };
+
+  const carregarExtrato = async () => {
+    try {
+      const response = await fetch(`${API_URL}/extrato`);
+      const data = await response.json();
+      
+      // Formata a data que vem do Java para o padrão brasileiro
+      const transacoesFormatadas = data.map(t => {
+        const dataObj = new Date(t.dataHora);
+        return {
+          ...t,
+          data: dataObj.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+        };
+      });
+      
+      // Inverte o array para mostrar as mais recentes primeiro
+      setTransacoes(transacoesFormatadas.reverse());
+    } catch (error) {
+      console.error("Erro ao carregar extrato:", error);
+    }
+  };
 
   const abrirModal = (tipo) => {
     setTipoTransacao(tipo);
-    setValorInput(''); // Limpa o campo sempre que o modal abre
+    setValorInput('');
     setModalAberto(true);
   };
 
@@ -23,12 +61,35 @@ function App() {
     setModalAberto(false);
   };
 
-  const handleConfirmar = (e) => {
-    e.preventDefault(); // Evita que a página recarregue ao dar submit no formulário
+  const handleConfirmar = async (e) => {
+    e.preventDefault();
     
-    // Por enquanto, apenas exibimos no console. O próximo passo será enviar isso para o Java!
-    console.log(`Simulando envio para a API: ${tipoTransacao} no valor de R$ ${valorInput}`);
-    fecharModal();
+    const valorNum = parseFloat(valorInput);
+    if (isNaN(valorNum) || valorNum <= 0) return;
+
+    const endpoint = tipoTransacao === 'DEPOSITO' ? '/depositar' : '/sacar';
+
+    try {
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ valor: valorNum })
+      });
+
+      if (!response.ok) {
+        throw new Error('Falha na transação. Verifique o saldo.');
+      }
+
+      // Atualiza a tela com os novos dados
+      await carregarDadosConta();
+      await carregarExtrato();
+      fecharModal();
+      
+    } catch (error) {
+      alert(error.message); // Um alerta simples em caso de erro (ex: saldo insuficiente)
+    }
   };
 
   return (
@@ -38,7 +99,9 @@ function App() {
         {/* Cabeçalho */}
         <header className="pt-8 pb-2">
           <h1 className="text-3xl font-bold text-slate-900">Simple Bank</h1>
-          <p className="text-slate-500 mt-1">Bem-vindo, Venícius!</p>
+          <p className="text-slate-500 mt-1">
+            Bem-vindo(a), {titular || 'Carregando...'}!
+          </p>
         </header>
 
         {/* Card Principal - Saldo */}
@@ -75,7 +138,7 @@ function App() {
             {transacoes.length === 0 ? (
               <p className="p-8 text-center text-slate-500">Nenhuma movimentação encontrada.</p>
             ) : (
-              <ul className="divide-y divide-slate-100">
+              <ul className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
                 {transacoes.map((t) => (
                   <li key={t.id} className="flex items-center justify-between p-6 hover:bg-slate-50 transition-colors">
                     <div className="flex flex-col gap-1">
@@ -97,7 +160,7 @@ function App() {
 
       </div>
 
-      {/* --- RENDERIZAÇÃO CONDICIONAL DO MODAL --- */}
+      {/* --- MODAL --- */}
       {modalAberto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-2xl">
